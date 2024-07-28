@@ -1,42 +1,28 @@
-import pandas as pd
-from transformers import TFAutoModelForSequenceClassification, AutoTokenizer
-import tensorflow as tf
+from transformers import pipeline
 
-# Load the resume data
-resume_df = pd.read_csv('resume.csv')
 
-# Use the 'Resume_str' column for embedding
-resume_df['combined_text'] = resume_df['Resume_str']
+class LLMExplainer:
+    def __init__(self):
+        # Initialize the summarization pipeline
+        self.summarizer = pipeline("summarization", model="facebook/bart-large-cnn", device=-1)  # device=-1 uses CPU
 
-# Load a pre-trained model and tokenizer
-tokenizer = AutoTokenizer.from_pretrained('distilbert-base-uncased')
-model = TFAutoModelForSequenceClassification.from_pretrained('distilbert-base-uncased', num_labels=len(resume_df['Category'].unique()))
+    def generate_explanation(self, query, candidate):
+        # Combine job description and candidate information
+        combined_text = f"Job Description: {query}\n\nCandidate Profile: {candidate['job_skills']} {candidate['experience']} {candidate['projects']}"
 
-# Tokenize the text data
-inputs = tokenizer(resume_df['combined_text'].tolist(), return_tensors='tf', padding=True, truncation=True, max_length=128)
+        # Generate summary using the LLM
+        summary = self.summarizer(combined_text, max_length=45, min_length=30, do_sample=False)[0]['summary_text']
 
-# Convert categories to numerical labels
-label_map = {category: idx for idx, category in enumerate(resume_df['Category'].unique())}
-labels = resume_df['Category'].map(label_map).values
+        return summary
 
-# Ensure labels are in the correct format
-labels = tf.convert_to_tensor(labels, dtype=tf.int32)
+    def explain_match(self, query, candidate):
+        return self.generate_explanation(query, candidate)
 
-# Prepare dataset
-dataset = tf.data.Dataset.from_tensor_slices((dict(inputs), labels))
-dataset = dataset.shuffle(100).batch(8).prefetch(tf.data.AUTOTUNE)
 
-# Compile the model with a suitable loss function
-optimizer = tf.keras.optimizers.Adam(learning_rate=5e-5)
-loss = tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True)
-model.compile(optimizer=optimizer, loss=loss, metrics=['accuracy'])
+# Create an instance of the LLMExplainer
+explainer = LLMExplainer()
 
-# Train the model
-model.fit(dataset, epochs=1)
 
-# Save the fine-tuned model
-model.save_pretrained('fine_tuned_model')
-tokenizer.save_pretrained('fine_tuned_tokenizer')
-
-print("Fine-tuning complete and model saved.")
-
+# Function to be imported and used in other modules
+def get_match_explanation(query, candidate):
+    return explainer.explain_match(query, candidate)
